@@ -1,0 +1,28 @@
+# Virtual environment
+venv/
+env/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables / secrets
+.env
+
+# Data & runtime artifacts
+data/*
+temp/*
+vectorstore/*
+!data/.gitkeep
+!temp/.gitkeep
+!vectorstore/.gitkeep
+
+# FAISS index files
+*.faiss
+*.pkl
+*.index
+
+# OS junk
+.DS_Store
