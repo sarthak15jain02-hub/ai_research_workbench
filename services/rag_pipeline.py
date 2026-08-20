@@ -2,31 +2,35 @@ from utils.file_handler import save_uploaded_file
 from utils.pdf_loader import load_pdf
 from utils.text_splitter import split_documents
 from utils.embedding_model import load_embedding_model
-from utils.vector_store import create_vector_store
+from utils.vector_store import create_vector_store, add_to_vector_store
 from utils.retriever import get_retriever
 
 
-def build_retriever(uploaded_file):
+def process_uploaded_files(uploaded_files, vector_store, processed_filenames, all_documents, all_chunks):
+    embedding_model = None
+    new_files_processed = False
 
-    # Save PDF
-    file_path = save_uploaded_file(uploaded_file)
+    for uploaded_file in uploaded_files:
+        if uploaded_file.name in processed_filenames:
+            continue
 
-    # Load PDF
-    documents = load_pdf(file_path)
+        if embedding_model is None:
+            embedding_model = load_embedding_model()
 
-    # Split Documents
-    chunks = split_documents(documents)
+        file_path = save_uploaded_file(uploaded_file)
+        documents = load_pdf(file_path)
+        chunks = split_documents(documents)
 
-    # Load Embedding Model
-    embedding_model = load_embedding_model()
+        if vector_store is None:
+            vector_store = create_vector_store(chunks, embedding_model)
+        else:
+            vector_store = add_to_vector_store(vector_store, chunks)
 
-    # Create Vector Store
-    vector_store = create_vector_store(
-        chunks,
-        embedding_model
-    )
+        all_documents.extend(documents)
+        all_chunks.extend(chunks)
+        processed_filenames.add(uploaded_file.name)
+        new_files_processed = True
 
-    # Create Retriever
-    retriever = get_retriever(vector_store)
+    retriever = get_retriever(vector_store) if vector_store else None
 
-    return retriever, documents, chunks, file_path
+    return vector_store, retriever, all_documents, all_chunks, processed_filenames, new_files_processed
