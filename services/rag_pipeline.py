@@ -7,6 +7,13 @@ from utils.retriever import get_retriever
 
 
 def process_uploaded_files(uploaded_files, vector_store, processed_filenames, all_documents, all_chunks):
+    """
+    Handles one or more newly uploaded files.
+    Skips files already processed this session.
+    Adds new files into the existing vector_store, or creates one if none exists yet.
+    Only loads the embedding model if there's actually a new file to process.
+    Returns updated: vector_store, retriever, all_documents, all_chunks, processed_filenames
+    """
     embedding_model = None
     new_files_processed = False
 
