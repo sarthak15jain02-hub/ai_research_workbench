@@ -1,28 +1,50 @@
-# Virtual environment
+# Virtual environments
 venv/
 env/
+.venv/
+
+# Python cache, build, test, and coverage files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
 *.egg-info/
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-
-# Environment variables / secrets
+# Secrets and local environment configuration
 .env
+.env.*
+!.env.example
 
-# Data & runtime artifacts
+# Runtime uploads and generated vector-store data
 data/*
-temp/*
-vectorstore/*
 !data/.gitkeep
+temp/*
 !temp/.gitkeep
+vectorstore/*
 !vectorstore/.gitkeep
-
-# FAISS index files
 *.faiss
-*.pkl
 *.index
+*.pkl
 
-# OS junk
+# Streamlit local settings
+.streamlit/secrets.toml
+
+# Logs
+*.log
+
+# Operating-system files
 .DS_Store
+Thumbs.db
+
+# Editor and IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo

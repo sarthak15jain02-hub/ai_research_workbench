@@ -7,6 +7,9 @@ The project is designed for research questions whose exact wording may not appea
 ## What the application currently does
 
 - Upload one or multiple text-based PDF papers.
+- Uses a two-screen interface: a compact **Overview** page for service guidance and workspace settings, followed by a dedicated **Research Workbench** page for paper analysis.
+- Provides an Overview → Workbench navigation flow, including a return-to-overview control from the workbench.
+- Provides Clear Workspace on the Overview page; it clears session papers, chat history, selections, and the visible file uploader state.
 - Automatically starts processing when the uploaded-file selection changes; there is no separate Process button.
 - Extracts text page by page and creates chunks for retrieval.
 - Builds a separate in-memory FAISS vector store for every uploaded paper.
@@ -22,6 +25,10 @@ The project is designed for research questions whose exact wording may not appea
 - Requires paper-grounded answers to include paper/page citations where available.
 - Shows the retrieved evidence below every answer.
 - Shows the newest answer first in the bottom **🤖 Answers** section; earlier answers are below it.
+- Labels every response as **Paper Evidence**, **General Knowledge**, **Insufficient Paper Evidence**, or **Input Error**.
+- Supports two removal behaviours:
+  - use the `×` in the uploader to remove a PDF completely from the uploader and the current RAG workspace;
+  - use **Remove from workspace** below Loaded papers to stop retrieval from that paper while keeping it visible in the uploader.
 - Keeps general-knowledge fallback disabled by default. Users can enable it from the sidebar, and such answers are explicitly labelled.
 - Detects PDFs with no selectable text and tells the user that OCR is required.
 
@@ -56,6 +63,8 @@ The application first identifies whether the question belongs to a recognised re
 | Future Work | What do the authors propose for future work? | Conclusion, Results |
 
 For a recognised intent, the search query is expanded with related academic terms. The user's original question is still sent to Gemini unchanged; only retrieval uses the expanded query.
+
+For **Problem Statement** and **Research Gap** questions, the retriever also force-includes early chunks from the paper. This is important because the actual motivation and limitations of earlier work are usually in the Abstract and Introduction, even when the phrase “problem statement” never appears.
 
 ### 3. Hybrid retrieval
 
@@ -214,15 +223,30 @@ If `localhost` does not work in Brave, use [http://127.0.0.1:8501](http://127.0.
 
 ## Using the application
 
-1. Start the app.
-2. Upload one or more research PDFs under **1. Upload PDFs**.
-3. Wait while the application automatically extracts text, creates embeddings, and builds indexes. Each successful PDF displays `✅ Indexed`.
-4. Check **Loaded papers** to see PDF name, page count, and chunk count.
-5. Under **2. Select evidence sources**, select the paper(s) you want included in the answer.
-6. Under **3. Ask or run a research action**, choose a Quick Research Action or select `Custom question` and type a question.
-7. Click **Ask**.
-8. Find the result in the bottom **🤖 Answers** section. The most recent answer is always first.
-9. Open **Retrieved evidence** below an answer to check the paper, page, section, and excerpt used.
+### Overview page
+
+The Overview is the application's entry page. It contains:
+
+- A short explanation of the service and its three-step workflow.
+- The **Allow general-knowledge fallback** toggle.
+- The **Clear workspace** button.
+- Current session counts for papers and answers.
+- The **Open research workbench** button.
+
+### Research Workbench page
+
+1. Open the Research Workbench from the Overview page.
+2. Upload one or more research PDFs under **Upload research papers**.
+3. Wait while the application automatically extracts text, creates embeddings, and builds indexes. Each successful PDF displays `Indexed successfully`.
+4. Check **Loaded papers** to see the PDF name, page count, chunk count, and workspace-removal control.
+5. Under **Choose evidence sources**, select the paper(s) you want included in the answer.
+6. Under **Ask a research question**, choose a Quick Analysis action or select `Custom question` and type your own question.
+7. Click **Generate grounded answer**.
+8. Find the result in the bottom **🤖 Answers** section. The newest answer is always first.
+9. Open **Retrieved evidence** below an answer to inspect paper name, page, section, and excerpt.
+10. Use **← Back to overview** in the sidebar to return to the home page.
+
+To remove a PDF completely, click its `×` in the uploader. This automatically removes it from Loaded papers, paper selection, and future retrieval. The **Remove from workspace** button below Loaded papers removes only the in-memory RAG version; the file remains visible in the uploader until its `×` is clicked. Clear Workspace resets the entire current session and clears the uploader too.
 
 For the most trustworthy research-paper responses, leave **Allow general-knowledge fallback** switched off.
 
@@ -283,6 +307,14 @@ For each selected paper, explain the problem it addresses under separate heading
 4. Select both papers and ask: `For each selected paper, explain the problem it addresses under separate headings.`
 5. Check that the answer clearly separates the papers and does not mix their facts or citations.
 
+### Problem-statement retrieval test
+
+1. Upload one paper and select only that paper.
+2. Ask: `What is the problem statement of this paper?`
+3. Open **Retrieved evidence**.
+4. Confirm that early pages are included, usually an `abstract` or `introduction` chunk on page 1–3.
+5. Confirm that the response describes the paper's problem, prior-work limitation, and proposed direction rather than only repeating a generic definition.
+
 ### Duplicate-upload test
 
 1. Upload a paper that is already loaded.
@@ -307,16 +339,14 @@ For each selected paper, explain the problem it addresses under separate heading
 
 ## Recommended next improvements
 
-1. **Remove individual papers:** Add a remove button per loaded PDF instead of clearing the complete workspace.
-2. **Improve Loaded papers UI:** Use cards or a table with filename, pages, chunks, and removal controls.
-3. **Show detailed ingestion progress:** Display extracting, splitting, embedding, and indexed stages.
-4. **Improve answer status:** Add visible labels for Paper Evidence, General Knowledge, and Insufficient Evidence.
-5. **Build comparison mode:** Generate a structured comparison table with a separate evidence column for each selected paper.
-6. **Persist indexes:** Save/load per-paper FAISS indexes in `vectorstore/` so re-uploading is not needed after restart.
-7. **Add OCR:** Support scanned PDFs using OCRmyPDF or another OCR service.
-8. **Add reranking:** Rerank retrieved chunks before Gemini to improve answer precision for complex papers.
-9. **Create evaluation tests:** Keep real questions with expected source pages to measure changes in chunking, models, prompts, and ranking.
-10. **Modernise embeddings dependency:** Replace deprecated `langchain_community.embeddings.HuggingFaceEmbeddings` with `langchain_huggingface.HuggingFaceEmbeddings` after installing `langchain-huggingface`.
+1. **Show detailed ingestion progress:** Display extracting, splitting, embedding, and indexed stages for every PDF.
+2. **Build comparison mode:** Generate a structured comparison table with a separate evidence column for each selected paper.
+3. **Persist indexes:** Save/load per-paper FAISS indexes in `vectorstore/` so re-uploading is not needed after restart.
+4. **Add OCR:** Support scanned PDFs using OCRmyPDF or another OCR service.
+5. **Add reranking:** Rerank retrieved chunks before Gemini to improve answer precision for complex papers.
+6. **Create evaluation tests:** Keep real questions with expected source pages to measure changes in chunking, models, prompts, and ranking.
+7. **Add answer export:** Let users download a conversation or report as Markdown, PDF, or JSON.
+8. **Modernise embeddings dependency:** Replace deprecated `langchain_community.embeddings.HuggingFaceEmbeddings` with `langchain_huggingface.HuggingFaceEmbeddings` after installing `langchain-huggingface`.
 
 ## Troubleshooting
 
