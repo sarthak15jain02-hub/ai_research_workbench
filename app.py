@@ -12,6 +12,7 @@ for key, default in {
     "chat_history": [],
     "ingestion_results": [],
     "last_upload_signature": (),
+    "removed_paper_ids": set(),
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -39,35 +40,103 @@ uploaded_files = st.file_uploader(
     help="PDFs are processed automatically after upload."
 )
 
-if uploaded_files:
-    current_upload_signature = tuple(
-        sorted(file_hash(uploaded_file) for uploaded_file in uploaded_files)
+uploaded_by_id = {
+    file_hash(uploaded_file): uploaded_file
+    for uploaded_file in uploaded_files
+}
+
+current_upload_ids = set(uploaded_by_id)
+previous_upload_ids = set(st.session_state.last_upload_signature)
+
+# If the user clicks × in the uploader, that file is no longer selected.
+# Remove it from the RAG workspace as well.
+paper_ids_removed_from_uploader = previous_upload_ids - current_upload_ids
+
+for paper_id in paper_ids_removed_from_uploader:
+    st.session_state.papers.pop(paper_id, None)
+
+    # Allow the paper to be indexed again if the user uploads it later.
+    st.session_state.removed_paper_ids.discard(paper_id)
+
+# Find PDFs that were newly added to the uploader and are not manually removed.
+new_uploaded_files = [
+    uploaded_file
+    for paper_id, uploaded_file in uploaded_by_id.items()
+    if (
+        paper_id not in st.session_state.papers
+        and paper_id not in st.session_state.removed_paper_ids
     )
+]
 
-    if current_upload_signature != st.session_state.last_upload_signature:
-        with st.spinner("Extracting text, creating embeddings, and building indexes..."):
-            (
-                st.session_state.papers,
-                st.session_state.ingestion_results,
-            ) = process_uploaded_files(
-                uploaded_files,
-                st.session_state.papers,
-            )
+if new_uploaded_files:
+    with st.spinner("Extracting text, creating embeddings, and building indexes..."):
+        (
+            st.session_state.papers,
+            st.session_state.ingestion_results,
+        ) = process_uploaded_files(
+            new_uploaded_files,
+            st.session_state.papers,
+        )
 
-        st.session_state.last_upload_signature = current_upload_signature
+    for result in st.session_state.ingestion_results:
+        if result["status"] == "processed":
+            st.success(f"✅ Indexed: {result['name']}")
+        elif result["status"] == "already_loaded":
+            st.info(f"ℹ️ Already loaded: {result['name']}")
+        else:
+            st.error(f"❌ Could not process {result['name']}: {result['error']}")
 
-        for result in st.session_state.ingestion_results:
-            if result["status"] == "processed":
-                st.success(f"✅ Indexed: {result['name']}")
-            elif result["status"] == "already_loaded":
-                st.info(f"ℹ️ Already loaded: {result['name']}")
-            else:
-                st.error(f"❌ Could not process {result['name']}: {result['error']}")
+elif paper_ids_removed_from_uploader:
+    st.session_state.ingestion_results = []
+    st.info("Removed deselected PDF(s) from the current workspace.")
+
+st.session_state.last_upload_signature = tuple(sorted(current_upload_ids))
 
 if st.session_state.papers:
     st.subheader("Loaded papers")
-    for paper in st.session_state.papers.values():
-        st.caption(f"• {paper['name']} — {paper['page_count']} pages, {paper['chunk_count']} chunks")
+    st.caption(
+        "These papers are available for retrieval in the current session. "
+        "Removing a paper stops future questions from searching it."
+    )
+
+    for paper_id, paper in list(st.session_state.papers.items()):
+        name_column, details_column, remove_column = st.columns([6, 2, 1])
+
+        with name_column:
+            st.markdown(f"📄 **{paper['name']}**")
+
+        with details_column:
+            st.caption(
+                f"{paper['page_count']} pages\n\n"
+                f"{paper['chunk_count']} chunks"
+            )
+
+        with remove_column:
+            if st.button(
+                "Remove",
+                key=f"remove_paper_{paper_id}",
+                use_container_width=True,
+                type="secondary",
+            ):
+                removed_paper_name = paper["name"]
+
+                # Removes this paper's chunks and FAISS vector store
+                # from the current Streamlit session.
+                del st.session_state.papers[paper_id]
+
+                # Prevents this paper from returning automatically while it
+                # remains selected inside the uploader.
+                st.session_state.removed_paper_ids.add(paper_id)
+
+                # Clear only the latest upload status messages.
+                # Existing chat answers are intentionally preserved.
+                st.session_state.ingestion_results = []
+
+                st.toast(
+                    f"Removed {removed_paper_name} from this workspace.",
+                    icon="🗑️",
+                )
+                st.rerun()
 
 st.header("2. Select evidence sources")
 paper_ids = list(st.session_state.papers)
@@ -110,6 +179,20 @@ for turn in reversed(st.session_state.chat_history):
         st.markdown(turn["question"])
 
     with st.chat_message("assistant"):
+        answer_type = turn.get("answer_type", "paper_evidence")
+
+        if answer_type == "paper_evidence":
+            st.success("✅ Paper Evidence")
+
+        elif answer_type == "general_knowledge":
+            st.info("ℹ️ General Knowledge")
+
+        elif answer_type == "insufficient_evidence":
+            st.warning("⚠️ Insufficient Paper Evidence")
+
+        elif answer_type == "input_error":
+            st.error("❌ Input Error")
+
         st.markdown(turn["answer"])
 
         if turn["sources"]:

@@ -6,27 +6,70 @@ from config import CHUNK_OVERLAP, CHUNK_SIZE
 
 
 SECTION_PATTERNS = [
-    ("abstract", r"^\s*(?:\d+(?:\.\d+)?\s+)?abstract\s*$"),
-    ("introduction", r"^\s*(?:\d+(?:\.\d+)?\s+)?introduction\s*$"),
-    ("background", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:background|motivation)\s*$"),
-    ("related_work", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:related work|literature review)\s*$"),
-    ("methods", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:method|methods|methodology|proposed method|approach)\s*$"),
-    ("dataset", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:dataset|data|materials)\s*$"),
-    ("experiments", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:experiments?|experimental setup|evaluation)\s*$"),
-    ("results", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:results?|findings|discussion)\s*$"),
-    ("conclusion", r"^\s*(?:\d+(?:\.\d+)?\s+)?(?:conclusion|conclusions|future work)\s*$"),
-    ("references", r"^\s*(?:references|bibliography)\s*$"),
+    (
+        "abstract",
+        r"\babstract\b",
+    ),
+    (
+        "introduction",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?introduction\b",
+    ),
+    (
+        "background",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:background|motivation)\b",
+    ),
+    (
+        "related_work",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:related work|related works|literature review)\b",
+    ),
+    (
+        "methods",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:method|methods|methodology|proposed method|proposed approach|approach)\b",
+    ),
+    (
+        "dataset",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:dataset|data|materials)\b",
+    ),
+    (
+        "experiments",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:experiment|experiments|experimental setup|evaluation)\b",
+    ),
+    (
+        "results",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:result|results|findings|discussion)\b",
+    ),
+    (
+        "conclusion",
+        r"(?:^|\n)\s*(?:(?:\d+|[IVXLC]+)\.?\s+)?(?:conclusion|conclusions|future work)\b",
+    ),
+    (
+        "references",
+        r"(?:^|\n)\s*(?:references|bibliography)\b",
+    ),
 ]
 
 
 def _section_on_page(text, current_section):
-    # Section headings are usually isolated lines.  Keep prior section across pages.
-    for line in text.splitlines()[:25]:
-        for section, pattern in SECTION_PATTERNS:
-            if re.match(pattern, line, flags=re.IGNORECASE):
-                return section
-    return current_section
+    """
+    Detect common research-paper headings from the start of each page.
 
+    Uses search instead of exact line matching because PDF extraction often
+    produces headings such as 'ABSTRACT Cricket...' or 'I. INTRODUCTION'.
+    """
+
+    page_start = "\n".join(
+        text.splitlines()[:40]
+    )
+
+    for section, pattern in SECTION_PATTERNS:
+        if re.search(
+            pattern,
+            page_start,
+            flags=re.IGNORECASE,
+        ):
+            return section
+
+    return current_section
 
 def split_documents(documents):
     splitter = RecursiveCharacterTextSplitter(
