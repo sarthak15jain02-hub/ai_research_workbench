@@ -1,145 +1,390 @@
 # 📚 AI Research Workbench
 
-An intelligent Retrieval-Augmented Generation (RAG) application for querying and analyzing research papers using semantic search and LLM-powered reasoning.
+AI Research Workbench is a Streamlit-based Retrieval-Augmented Generation (RAG) application for reading and querying one or more research-paper PDFs. Users upload PDFs, the application converts their content into searchable vectors, retrieves relevant evidence for a question, and asks Google Gemini to produce a grounded answer with source details.
 
-Upload a research paper (or multiple), ask questions in natural language, and get answers grounded in the actual paper content — with automatic fallback to general knowledge when the paper doesn't have the answer.
+The project is designed for research questions whose exact wording may not appear in the PDF. For example, a paper may not contain the literal phrase **“problem statement”**, but it commonly explains the problem in the Abstract, Introduction, Motivation, Background, or Related Work sections. The application detects these question types and adjusts retrieval to find the relevant evidence.
 
----
+## What the application currently does
 
-## 🚀 Features
+- Upload one or multiple text-based PDF papers.
+- Automatically starts processing when the uploaded-file selection changes; there is no separate Process button.
+- Extracts text page by page and creates chunks for retrieval.
+- Builds a separate in-memory FAISS vector store for every uploaded paper.
+- Lets the user choose which loaded paper(s) are searched.
+- Prevents duplicate indexing by identifying PDF content with a SHA-256 hash, rather than only its filename.
+- Uses hybrid retrieval:
+  - dense semantic retrieval with Hugging Face embeddings and FAISS;
+  - BM25 keyword retrieval for exact technical terms, acronyms, datasets, and metrics;
+  - Reciprocal Rank Fusion (RRF) to combine the two rankings.
+- Detects common research-question intents: Problem Statement, Research Gap, Methodology, Dataset, Results, Limitations, and Future Work.
+- Boosts relevant sections for those intents, such as Abstract/Introduction for a problem-statement question.
+- Uses Gemini (`gemini-2.5-flash` by default) to answer using retrieved evidence.
+- Requires paper-grounded answers to include paper/page citations where available.
+- Shows the retrieved evidence below every answer.
+- Shows the newest answer first in the bottom **🤖 Answers** section; earlier answers are below it.
+- Keeps general-knowledge fallback disabled by default. Users can enable it from the sidebar, and such answers are explicitly labelled.
+- Detects PDFs with no selectable text and tells the user that OCR is required.
 
-### ✅ Completed
+## How it works
 
-- **Core RAG Pipeline** — PDF upload → chunking → embedding → FAISS vector indexing → semantic retrieval → LLM-generated answer, grounded strictly in retrieved content.
-- **Hybrid Mode** — If the uploaded paper doesn't contain the answer, the system automatically falls back to Gemini's general knowledge instead of returning a dead end. Fallback answers are clearly labeled in the UI so users always know the source.
-- **Conversation Memory + Query Rewriting** — Tracks recent conversation turns and resolves follow-up questions that use pronouns ("it", "that", "this method") by rewriting them into standalone queries before retrieval — improving retrieval accuracy on multi-turn conversations.
-- **Structural Question Handling** — Questions like "what is the problem statement" or "what is the research gap" often don't phrase-match well against chunked academic text. The system detects these and force-includes the paper's opening sections (Abstract/Introduction) alongside standard retrieval results.
-- **Session-State Caching** — The vector store and retriever are built once per session and cached, avoiding redundant re-embedding on every interaction.
-- **Multi-PDF Upload (Basic)** — Multiple papers can be uploaded and accumulated into a shared vector index without needing to restart the session.
-- **Quick Research Actions** — Pre-built structured queries (Limitations, Future Work, Methodology, Dataset, Research Gap) with specialized formatting rules for each category.
-- **Conversational UI** — Full chat-style interface showing the complete question/answer history for the session, not just the latest response.
+### 1. Upload and ingestion
 
-### 🚧 In Progress
+When PDFs are selected in the uploader, the application:
 
-- **Cross-Paper Disambiguation** — When multiple papers are loaded, ambiguous questions currently resolve to whichever paper's content scores highest in similarity search, without explicitly notifying the user or searching across all loaded papers. Improving this is a prerequisite for reliable comparison features.
-- **Research Comparison** — Explicit side-by-side comparison of methodology, results, or findings across multiple uploaded papers.
-- **Literature Review Generator** — Auto-generated structured literature review summaries spanning multiple uploaded papers.
+1. Calculates a SHA-256 hash of each PDF's bytes. This allows the same content to be recognised even if the filename differs.
+2. Saves the file inside `data/` using a safe name.
+3. Extracts text one page at a time with `PyPDFLoader`.
+4. Adds metadata to each page: `paper_id`, `paper_name`, `page_number`, and `source_file`.
+5. Detects common academic headings such as Abstract, Introduction, Methods, Dataset, Experiments, Results, Conclusion, and References.
+6. Splits the page text into overlapping chunks. Every chunk keeps its source paper, page number, detected section, and unique `chunk_id`.
+7. Creates one FAISS vector store for that paper.
 
----
+If one PDF fails to process, the remaining PDFs can still be indexed and queried.
 
-## 🛠️ Tech Stack
+### 2. Question understanding
+
+The application first identifies whether the question belongs to a recognised research intent. For example:
+
+| Question type | Example question | Sections favoured during retrieval |
+|---|---|---|
+| Problem Statement | What problem does this paper solve? | Abstract, Introduction, Background, Related Work, Conclusion |
+| Research Gap | What gap in existing work does this paper address? | Abstract, Introduction, Background, Related Work |
+| Methodology | Explain the proposed methodology. | Methods, Dataset, Experiments |
+| Dataset | Which dataset was used and how was it processed? | Dataset, Methods, Experiments |
+| Results | What are the major experimental results? | Experiments, Results, Conclusion |
+| Limitations | What limitations do the authors identify? | Results, Conclusion, Discussion |
+| Future Work | What do the authors propose for future work? | Conclusion, Results |
+
+For a recognised intent, the search query is expanded with related academic terms. The user's original question is still sent to Gemini unchanged; only retrieval uses the expanded query.
+
+### 3. Hybrid retrieval
+
+For every selected paper, two retrieval methods run independently:
+
+- **Dense semantic retrieval:** FAISS compares the question embedding with chunk embeddings. This finds conceptually related text even when exact words differ.
+- **BM25 keyword retrieval:** BM25 ranks chunks containing important words, acronyms, dataset names, metrics, and method names.
+
+The two result lists are joined with Reciprocal Rank Fusion. Matching academic sections receive a small score boost. Reference chunks are down-ranked so citations alone do not become the main answer evidence.
+
+For multiple selected papers, each paper is searched separately. The application limits the number of chunks taken from each paper so a longer or more similar paper does not take all evidence slots.
+
+### 4. Answer generation
+
+Retrieved chunks are formatted with evidence metadata, for example:
+
+```text
+[Paper: example_paper.pdf | Page: 3 | Section: introduction]
+Retrieved passage from the PDF...
+```
+
+Gemini receives this evidence, the original question, and limited recent conversation history. It is instructed to:
+
+- use the supplied evidence rather than inventing facts;
+- cite paper claims as `[Paper name, p. N]`;
+- distinguish evidence from different papers;
+- return `INSUFFICIENT_EVIDENCE` when the evidence cannot answer the question.
+
+If general-knowledge fallback is disabled, insufficient paper evidence produces a paper-only message. If it is enabled, the fallback is visibly labelled as general knowledge and is not presented as a paper claim.
+
+## Project structure
+
+```text
+AI Research Workbench/
+├── app.py                         # Streamlit UI, session state, uploads, answers
+├── config.py                      # Environment-based configuration values
+├── requirements.txt               # Python package dependencies
+├── README.md                      # Project documentation
+├── .env                           # Local Gemini API key; never commit this file
+├── data/                          # Runtime PDF copies; ignored by Git
+├── services/
+│   ├── llm_service.py             # Gemini client creation
+│   ├── prompt_template.py         # Grounded-answer and fallback prompts
+│   ├── query_engine.py            # Intent detection, hybrid search, RRF, answer flow
+│   ├── rag_pipeline.py            # Per-PDF ingestion process
+│   └── research_tasks.py          # Quick Research Action definitions
+└── utils/
+    ├── embedding_model.py         # Cached Hugging Face embedding model
+    ├── file_handler.py            # PDF hashing and safe local save
+    ├── pdf_loader.py              # PDF extraction and page metadata
+    ├── text_splitter.py           # Section detection and chunk creation
+    └── vector_store.py            # FAISS vector-store construction
+```
+
+## File-by-file guide
+
+| File | Main responsibility | Update it when you want to... |
+|---|---|---|
+| `app.py` | Website layout, widgets, session state, answer order/display | Improve UI, add tabs, remove-paper controls, progress bars, export buttons, or chat behaviour. |
+| `config.py` | Model names, chunk settings, filesystem paths, API-key loading | Change models, chunk size/overlap, or environment configuration. |
+| `services/rag_pipeline.py` | Process and isolate uploaded PDFs | Add ingestion stages, persistent indexing, OCR, file validation, or per-file progress. |
+| `services/query_engine.py` | Question intent, retrieval, ranking, and Gemini execution | Improve retrieval quality, add a new intent, comparison mode, reranking, or evaluation logs. |
+| `services/prompt_template.py` | Gemini instructions | Change answer format, citation style, summary format, or multi-paper comparison rules. |
+| `services/research_tasks.py` | Quick Action text and intent | Add actions such as Contributions, Authors, Paper Objective, or Literature Review. |
+| `utils/file_handler.py` | PDF hash and saved filename | Change local upload-file handling. |
+| `utils/pdf_loader.py` | Text extraction and metadata | Add OCR support, metadata extraction, or improved PDF error handling. |
+| `utils/text_splitter.py` | Headings, sections, chunk size/overlap | Improve section detection for new document formats. |
+| `utils/embedding_model.py` | Embedding model loading/caching | Trade retrieval quality for speed. Re-upload/re-index after changing this model. |
+| `utils/vector_store.py` | Build FAISS store | Add FAISS persistence or migrate to Chroma/Qdrant. |
+
+## Technology stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | [Streamlit](https://streamlit.io/) |
-| Orchestration | [LangChain](https://www.langchain.com/) |
-| Vector Store | [FAISS](https://github.com/facebookresearch/faiss) |
-| Embeddings | HuggingFace Sentence Transformers |
-| LLM | Google Gemini API (`gemini-2.5-flash`) |
-| PDF Parsing | PyPDF2 / LangChain document loaders |
+| User interface | Streamlit |
+| LLM | Google Gemini through `langchain-google-genai` |
+| Embeddings | Hugging Face Sentence Transformers (`BAAI/bge-base-en-v1.5` by default) |
+| Vector search | FAISS |
+| Keyword search | BM25 via `rank-bm25` |
+| PDF text extraction | PyPDF / LangChain `PyPDFLoader` |
+| RAG framework utilities | LangChain |
 
----
+## Requirements
 
-## 🏗️ Architecture
+- Python 3.10 or newer
+- A Google Gemini API key
+- An internet connection on the first run to download the embedding model
+- Text-based/searchable PDFs. Image-only/scanned PDFs require OCR first.
 
-```
-Upload PDF(s)
-      ↓
-PDF parsed → split into chunks → embedded → indexed in FAISS
-      ↓
-User asks a question
-      ↓
-(If follow-up) Query rewritten into a standalone question using conversation history
-      ↓
-Standalone query → semantic search against FAISS → relevant chunks retrieved
-      ↓
-(If structural question) Paper's opening chunks force-included alongside retrieved results
-      ↓
-Chunks + question + history → Gemini (paper-grounded prompt)
-      ↓
-If answer found in paper → returned to user
-If not found → same question re-sent to Gemini with no paper context,
-answered from general knowledge, clearly labeled as such
-```
+## Installation and setup
 
----
+### 1. Open the project folder
 
-## 📂 Project Structure
+Run terminal commands from the folder containing `app.py` and `requirements.txt`.
 
-```
-AI Research Workbench/
-├── app.py                     # Streamlit UI and app entry point
-├── config.py                  # Environment/config loading
-├── services/
-│   ├── rag_pipeline.py        # Multi-file processing orchestration
-│   ├── query_engine.py        # Core RAG logic: retrieval, hybrid mode, memory
-│   ├── llm_service.py         # Gemini LLM initialization
-│   ├── prompt_template.py     # All prompt templates (paper, fallback, rewrite)
-│   └── research_tasks.py      # Quick Action task definitions
-├── utils/
-│   ├── file_handler.py        # File save handling
-│   ├── pdf_loader.py          # PDF parsing + metadata tagging
-│   ├── text_splitter.py       # Chunking logic
-│   ├── embedding_model.py     # Embedding model loading
-│   ├── vector_store.py        # FAISS index creation/updates
-│   └── retriever.py           # Retriever configuration
-└── requirements.txt
-```
-
----
-
-## ⚙️ Setup
-
-### 1. Clone the repository
 ```bash
-git clone https://github.com/sarthak15jain02-hub/ai_research_workbench.git
-cd ai_research_workbench
+cd "/Users/sarthakjain/project/AI Research Workbench"
 ```
 
 ### 2. Create and activate a virtual environment
+
+macOS/Linux:
+
 ```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
 python -m venv venv
-source venv/bin/activate   # macOS/Linux
-venv\Scripts\activate      # Windows
+venv\Scripts\activate
 ```
 
 ### 3. Install dependencies
+
 ```bash
+venv/bin/pip install -r requirements.txt
+```
+
+On Windows after activating the virtual environment:
+
+```powershell
 pip install -r requirements.txt
 ```
 
-### 4. Set up environment variables
-Create a `.env` file in the project root:
-```
+### 4. Create the `.env` file
+
+Create `.env` in the project root, beside `app.py`.
+
+```env
 GOOGLE_API_KEY=your_gemini_api_key_here
 ```
-Get a free API key from [Google AI Studio](https://aistudio.google.com/).
+
+Optional settings:
+
+```env
+GEMINI_MODEL=gemini-2.5-flash
+EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=150
+```
+
+Never commit `.env` to GitHub. It contains your secret API key.
 
 ### 5. Run the app
+
 ```bash
-streamlit run app.py
+venv/bin/streamlit run app.py
 ```
-The app will open at `http://localhost:8501`.
 
----
+Open the URL printed in the terminal, usually [http://localhost:8501](http://localhost:8501).
 
-## 📝 Usage
+If `localhost` does not work in Brave, use [http://127.0.0.1:8501](http://127.0.0.1:8501), disable Brave Shields for that local page, or use another browser. The application itself is browser-independent.
 
-1. Upload one or more research papers (PDF format).
-2. Use **Quick Research Actions** for structured extraction (Limitations, Future Work, Methodology, etc.), or
-3. Ask any question directly in natural language via **Ask Questions**.
-4. Follow-up questions referencing prior turns ("what preprocessing was done on it?") are automatically resolved using conversation context.
-5. If the paper doesn't contain the answer, the system clearly labels responses drawn from general knowledge instead.
+## Using the application
 
----
+1. Start the app.
+2. Upload one or more research PDFs under **1. Upload PDFs**.
+3. Wait while the application automatically extracts text, creates embeddings, and builds indexes. Each successful PDF displays `✅ Indexed`.
+4. Check **Loaded papers** to see PDF name, page count, and chunk count.
+5. Under **2. Select evidence sources**, select the paper(s) you want included in the answer.
+6. Under **3. Ask or run a research action**, choose a Quick Research Action or select `Custom question` and type a question.
+7. Click **Ask**.
+8. Find the result in the bottom **🤖 Answers** section. The most recent answer is always first.
+9. Open **Retrieved evidence** below an answer to check the paper, page, section, and excerpt used.
 
-## 📌 Notes
+For the most trustworthy research-paper responses, leave **Allow general-knowledge fallback** switched off.
 
-- Running on Google Gemini's API free tier, which has daily request limits. For heavier usage, enable Cloud Billing on your Google AI Studio project.
-- This project prioritizes retrieval-based grounding (RAG) over full-document context stuffing, to remain scalable as multi-document support expands.
+## Quick Research Actions
 
----
+| Action | What it requests |
+|---|---|
+| Problem Statement | The problem, prior limitation, need, and how the paper addresses it. |
+| Paper Summary | Problem, objective, method, dataset, metrics, results, contributions, limitations, and future work. |
+| Research Gap | Limitations in earlier work and the gap the paper attempts to solve. |
+| Methodology | Step-by-step workflow, model/algorithm, inputs, training, and outputs. |
+| Dataset Analysis | Dataset name/source/size/classes/split/preprocessing/augmentation. |
+| Experimental Results | Datasets, metrics, numbers, comparisons, ablations, and conclusions. |
+| Limitations | Limitations explicitly supported by paper evidence. |
+| Future Work | Future directions explicitly proposed by the authors. |
 
-## 📄 License
+## Example questions
+
+```text
+What is the problem statement of this paper?
+```
+
+```text
+What research gap does this paper address?
+```
+
+```text
+Explain the methodology step by step.
+```
+
+```text
+What dataset was used, and how was it preprocessed?
+```
+
+```text
+What are the main experimental results and evaluation metrics?
+```
+
+```text
+For each selected paper, explain the problem it addresses under separate headings.
+```
+
+## How to test the current implementation
+
+### Single-paper test
+
+1. Upload one searchable PDF.
+2. Confirm it displays `✅ Indexed`.
+3. Select only that paper.
+4. Ask: `What is the problem statement of this paper?`
+5. Check that the answer is supported by the retrieved evidence and cites the correct paper/page.
+
+### Multi-paper test
+
+1. Upload two different PDFs.
+2. Select only Paper A and ask a question. Evidence should name only Paper A.
+3. Select only Paper B and ask the same question. Evidence should name only Paper B.
+4. Select both papers and ask: `For each selected paper, explain the problem it addresses under separate headings.`
+5. Check that the answer clearly separates the papers and does not mix their facts or citations.
+
+### Duplicate-upload test
+
+1. Upload a paper that is already loaded.
+2. The app should show `ℹ️ Already loaded` rather than creating duplicate embeddings.
+
+### Insufficient-evidence test
+
+1. Keep general-knowledge fallback off.
+2. Ask a question that the selected paper cannot answer.
+3. The response should state that there is insufficient paper evidence.
+4. Enable fallback and repeat. The response should be explicitly labelled as general knowledge.
+
+## Current limitations
+
+- Vector stores live only in Streamlit session memory. Restarting Streamlit requires PDF upload and indexing again.
+- `data/` stores uploaded PDF copies but the FAISS indexes are not persisted yet.
+- PDFs must contain selectable text. OCR is not implemented for scanned/image-only PDFs.
+- Section detection is based on common English research-paper headings. It may be less accurate for unusual layouts, multi-column extraction issues, or other languages.
+- Multi-paper retrieval is working, but there is no dedicated side-by-side comparison table yet.
+- Users should verify important claims against the displayed evidence and original PDF, especially for academic writing.
+- The current embedding import emits a LangChain deprecation warning. It does not prevent indexing or answering; migrating to `langchain-huggingface` is a maintenance improvement for a later update.
+
+## Recommended next improvements
+
+1. **Remove individual papers:** Add a remove button per loaded PDF instead of clearing the complete workspace.
+2. **Improve Loaded papers UI:** Use cards or a table with filename, pages, chunks, and removal controls.
+3. **Show detailed ingestion progress:** Display extracting, splitting, embedding, and indexed stages.
+4. **Improve answer status:** Add visible labels for Paper Evidence, General Knowledge, and Insufficient Evidence.
+5. **Build comparison mode:** Generate a structured comparison table with a separate evidence column for each selected paper.
+6. **Persist indexes:** Save/load per-paper FAISS indexes in `vectorstore/` so re-uploading is not needed after restart.
+7. **Add OCR:** Support scanned PDFs using OCRmyPDF or another OCR service.
+8. **Add reranking:** Rerank retrieved chunks before Gemini to improve answer precision for complex papers.
+9. **Create evaluation tests:** Keep real questions with expected source pages to measure changes in chunking, models, prompts, and ranking.
+10. **Modernise embeddings dependency:** Replace deprecated `langchain_community.embeddings.HuggingFaceEmbeddings` with `langchain_huggingface.HuggingFaceEmbeddings` after installing `langchain-huggingface`.
+
+## Troubleshooting
+
+### Browser opens a blank or “Running…” page
+
+Wait 5–10 seconds, then refresh once. If it remains blank, stop Streamlit with `Control + C` and run:
+
+```bash
+venv/bin/streamlit run app.py
+```
+
+Open the exact URL printed in the terminal.
+
+### Brave cannot load `localhost:8501`
+
+Try the following:
+
+1. Open `http://127.0.0.1:8501`.
+2. Disable Brave Shields for the local page.
+3. Hard-refresh with `Cmd + Shift + R`.
+4. Disable local ad-block/privacy extensions for this address.
+5. Use Chrome, Safari, or Firefox while developing if needed.
+
+### `requirements.txt` not found
+
+You are probably in the wrong folder. Check:
+
+```bash
+pwd
+ls app.py requirements.txt
+```
+
+Then run the installation command from this project root.
+
+### `GOOGLE_API_KEY is missing`
+
+Ensure `.env` is beside `app.py`, contains `GOOGLE_API_KEY=...`, and restart Streamlit after saving it.
+
+### First PDF processing is slow
+
+This is expected on first use. The Hugging Face embedding model must download and load once. Later indexing in the same session is faster because the model is cached.
+
+### Hugging Face unauthenticated-request warning
+
+This warning does not stop the app. It only means model downloads are not authenticated and may have lower Hub rate limits. You do not need an HF token for normal use unless downloads become rate-limited.
+
+### `HuggingFaceEmbeddings` deprecation warning
+
+This warning does not stop embeddings or answers. It is a future maintenance task: install `langchain-huggingface` and update the import in `utils/embedding_model.py` when you are ready.
+
+### “No selectable text was found” error
+
+The PDF is likely scanned/image-only. Use OCR to create a searchable PDF, then upload it again.
+
+### Answer does not look correct
+
+1. Check the selected paper(s); unselect irrelevant papers.
+2. Open **Retrieved evidence** and verify the excerpt supports the answer.
+3. Ask a narrower question with a specific topic, method, dataset, or result.
+4. For comparisons, explicitly say `separate headings for each selected paper`.
+5. Keep general-knowledge fallback disabled when you need a strictly paper-grounded answer.
+
+## Security notes
+
+- Keep `.env` private.
+- Never paste your Gemini API key into screenshots, commits, public chats, or GitHub repositories.
+- `data/`, `vectorstore/`, virtual environments, and `.env` should remain in `.gitignore`.
+
+## License
 
 This project is intended for educational and portfolio purposes.

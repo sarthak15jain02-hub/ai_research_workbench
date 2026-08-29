@@ -1,43 +1,39 @@
-from utils.file_handler import save_uploaded_file
+from utils.embedding_model import load_embedding_model
+from utils.file_handler import file_hash, save_uploaded_file
 from utils.pdf_loader import load_pdf
 from utils.text_splitter import split_documents
-from utils.embedding_model import load_embedding_model
-from utils.vector_store import create_vector_store, add_to_vector_store
-from utils.retriever import get_retriever
+from utils.vector_store import create_vector_store
 
 
-def process_uploaded_files(uploaded_files, vector_store, processed_filenames, all_documents, all_chunks):
-    """
-    Handles one or more newly uploaded files.
-    Skips files already processed this session.
-    Adds new files into the existing vector_store, or creates one if none exists yet.
-    Only loads the embedding model if there's actually a new file to process.
-    Returns updated: vector_store, retriever, all_documents, all_chunks, processed_filenames
-    """
+def process_uploaded_files(uploaded_files, papers):
+    """Ingest each PDF independently, so one failure never corrupts another paper."""
+    results = []
     embedding_model = None
-    new_files_processed = False
 
     for uploaded_file in uploaded_files:
-        if uploaded_file.name in processed_filenames:
+        paper_id = file_hash(uploaded_file)
+        if paper_id in papers:
+            results.append({"name": uploaded_file.name, "status": "already_loaded"})
             continue
 
-        if embedding_model is None:
-            embedding_model = load_embedding_model()
+        try:
+            if embedding_model is None:
+                embedding_model = load_embedding_model()
+            path = save_uploaded_file(uploaded_file, paper_id)
+            documents = load_pdf(path, paper_id, uploaded_file.name)
+            chunks = split_documents(documents)
+            papers[paper_id] = {
+                "id": paper_id,
+                "name": uploaded_file.name,
+                "path": path,
+                "page_count": len(documents),
+                "chunk_count": len(chunks),
+                "documents": documents,
+                "chunks": chunks,
+                "vector_store": create_vector_store(chunks, embedding_model),
+            }
+            results.append({"name": uploaded_file.name, "status": "processed"})
+        except Exception as error:
+            results.append({"name": uploaded_file.name, "status": "failed", "error": str(error)})
 
-        file_path = save_uploaded_file(uploaded_file)
-        documents = load_pdf(file_path)
-        chunks = split_documents(documents)
-
-        if vector_store is None:
-            vector_store = create_vector_store(chunks, embedding_model)
-        else:
-            vector_store = add_to_vector_store(vector_store, chunks)
-
-        all_documents.extend(documents)
-        all_chunks.extend(chunks)
-        processed_filenames.add(uploaded_file.name)
-        new_files_processed = True
-
-    retriever = get_retriever(vector_store) if vector_store else None
-
-    return vector_store, retriever, all_documents, all_chunks, processed_filenames, new_files_processed
+    return papers, results

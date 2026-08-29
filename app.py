@@ -1,158 +1,123 @@
 import streamlit as st
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
-if "processed_filenames" not in st.session_state:
-    st.session_state.processed_filenames = set()
-if "all_documents" not in st.session_state:
-    st.session_state.all_documents = []
-if "all_chunks" not in st.session_state:
-    st.session_state.all_chunks = []
-
-from services.rag_pipeline import process_uploaded_files
 from services.query_engine import ask_question
+from services.rag_pipeline import process_uploaded_files
 from services.research_tasks import TASKS
+from utils.file_handler import file_hash
 
-# Page Configuration
+st.set_page_config(page_title="AI Research Workbench", page_icon="📚", layout="wide")
 
-st.set_page_config(
-    page_title="Intelligent Research Paper Assistant",
-    page_icon="📚",
-    layout="wide"
-)
+for key, default in {
+    "papers": {},
+    "chat_history": [],
+    "ingestion_results": [],
+    "last_upload_signature": (),
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-# Title
+st.title("📚 AI Research Workbench")
+st.caption("Ask evidence-grounded questions across one or more research papers.")
 
-st.title("📚 Intelligent Research Paper Assistant")
-st.markdown(
-    "Upload one or more research papers and interact with them using **Retrieval-Augmented Generation (RAG)** powered by **Google Gemini**."
-)
-st.divider()
+with st.sidebar:
+    st.header("Workspace")
+    if st.button("Clear workspace", use_container_width=True):
+        st.session_state.papers = {}
+        st.session_state.chat_history = []
+        st.session_state.ingestion_results = []
+        st.session_state.last_upload_signature = ()
+        st.rerun()
+    allow_general_knowledge = st.toggle("Allow general-knowledge fallback", value=False)
+    st.caption("Keep this off for strict paper-grounded answers.")
 
-# Sidebar
+st.header("1. Upload PDFs")
 
-st.sidebar.title("⚙️ Settings")
-st.sidebar.info(
-    "Upload research papers and use Quick Research Actions or ask your own questions."
-)
-
-# Upload Research Papers
-
-st.header("📄 Upload Research Papers")
 uploaded_files = st.file_uploader(
-    "Choose PDF(s)",
-    type="pdf",
-    accept_multiple_files=True
+    "Choose one or more PDF files",
+    type=["pdf"],
+    accept_multiple_files=True,
+    help="PDFs are processed automatically after upload."
 )
 
 if uploaded_files:
-    with st.spinner("Processing research paper(s)..."):
-        (
-            vector_store,
-            retriever,
-            all_documents,
-            all_chunks,
-            processed_filenames,
-            new_files_processed
-        ) = process_uploaded_files(
-            uploaded_files,
-            st.session_state.vector_store,
-            st.session_state.processed_filenames,
-            st.session_state.all_documents,
-            st.session_state.all_chunks
-        )
+    current_upload_signature = tuple(
+        sorted(file_hash(uploaded_file) for uploaded_file in uploaded_files)
+    )
 
-        st.session_state.vector_store = vector_store
-        st.session_state.all_documents = all_documents
-        st.session_state.all_chunks = all_chunks
-        st.session_state.processed_filenames = processed_filenames
-
-    st.success(f"✅ {len(st.session_state.processed_filenames)} paper(s) loaded: {', '.join(st.session_state.processed_filenames)}")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Pages", len(st.session_state.all_documents))
-    with col2:
-        st.metric("Total Chunks", len(st.session_state.all_chunks))
-
-st.divider()
-
-# Quick Research Actions
-
-st.header("📑 Quick Research Actions")
-selected_task = st.selectbox(
-    "Choose an action",
-    list(TASKS.keys()),
-    index=None,
-    placeholder="Select a research action..."
-)
-generate_button = st.button(
-    "Generate",
-    use_container_width=True
-)
-
-if generate_button:
-    if not st.session_state.vector_store:
-        st.warning("Please upload a research paper first.")
-    elif selected_task is None:
-        st.warning("Please select a research action.")
-    else:
-        with st.spinner("Generating response..."):
-            answer = ask_question(
-                st.session_state.vector_store,
-                TASKS[selected_task],
-                all_chunks=st.session_state.all_chunks
-            )
-            st.session_state.chat_history.append(
-                {
-                    "type": "Quick Action",
-                    "question": selected_task,
-                    "answer": answer
-                }
+    if current_upload_signature != st.session_state.last_upload_signature:
+        with st.spinner("Extracting text, creating embeddings, and building indexes..."):
+            (
+                st.session_state.papers,
+                st.session_state.ingestion_results,
+            ) = process_uploaded_files(
+                uploaded_files,
+                st.session_state.papers,
             )
 
-st.divider()
+        st.session_state.last_upload_signature = current_upload_signature
 
-# Ask Questions
+        for result in st.session_state.ingestion_results:
+            if result["status"] == "processed":
+                st.success(f"✅ Indexed: {result['name']}")
+            elif result["status"] == "already_loaded":
+                st.info(f"ℹ️ Already loaded: {result['name']}")
+            else:
+                st.error(f"❌ Could not process {result['name']}: {result['error']}")
 
-st.header("💬 Ask Questions")
-question = st.text_input(
-    "Ask anything about the uploaded research paper(s)"
+if st.session_state.papers:
+    st.subheader("Loaded papers")
+    for paper in st.session_state.papers.values():
+        st.caption(f"• {paper['name']} — {paper['page_count']} pages, {paper['chunk_count']} chunks")
+
+st.header("2. Select evidence sources")
+paper_ids = list(st.session_state.papers)
+selected_paper_ids = st.multiselect(
+    "Search these papers",
+    options=paper_ids,
+    default=paper_ids,
+    format_func=lambda paper_id: st.session_state.papers[paper_id]["name"],
+    disabled=not paper_ids,
 )
-ask_button = st.button(
-    "Ask",
-    use_container_width=True
-)
 
-st.divider()
+st.header("3. Ask or run a research action")
+action = st.selectbox("Quick research action (optional)", ["Custom question"] + list(TASKS))
+default_question = "" if action == "Custom question" else TASKS[action]["question"]
+question = st.text_area("Question", value=default_question, placeholder="Example: What problem does this paper solve?")
 
-# Answer
-
-st.header("🤖 Conversation")
-if ask_button:
-    if not st.session_state.vector_store:
-        st.warning("Please upload a research paper first.")
-    elif question.strip() == "":
-        st.warning("Please enter a question.")
+if st.button("Ask", use_container_width=True, type="primary"):
+    if not selected_paper_ids:
+        st.warning("Select at least one paper.")
+    elif not question.strip():
+        st.warning("Enter a question.")
     else:
-        with st.spinner("Generating answer..."):
-            answer = ask_question(
-                st.session_state.vector_store,
-                question,
+        explicit_intent = None if action == "Custom question" else TASKS[action]["intent"]
+        with st.spinner("Retrieving evidence and generating a cited answer..."):
+            response = ask_question(
+                papers=st.session_state.papers,
+                selected_paper_ids=selected_paper_ids,
+                question=question.strip(),
                 history=st.session_state.chat_history,
-                all_chunks=st.session_state.all_chunks
+                intent=explicit_intent,
+                allow_general_knowledge=allow_general_knowledge,
             )
-        st.session_state.chat_history.append(
-            {
-                "type": "Ask",
-                "question": question,
-                "answer": answer
-            }
-        )
+        st.session_state.chat_history.append({"question": question.strip(), **response})
+
+st.divider()
+st.header("🤖 Answers")
 
 for turn in reversed(st.session_state.chat_history):
     with st.chat_message("user"):
-        st.markdown(f"**[{turn['type']}]** {turn['question']}")
+        st.markdown(turn["question"])
+
     with st.chat_message("assistant"):
         st.markdown(turn["answer"])
+
+        if turn["sources"]:
+            with st.expander("Retrieved evidence"):
+                for source in turn["sources"]:
+                    st.markdown(
+                        f"**{source['paper']} — "
+                        f"p. {source['page']} "
+                        f"({source['section']})**"
+                    )
+                    st.caption(source["excerpt"] + "…")
