@@ -326,6 +326,21 @@ st.markdown(
             box-shadow: 0 10px 24px rgba(113, 97, 239, 0.25);
         }
 
+        .workbench-start-guide {
+            padding: 0.85rem 1rem;
+            margin: 0.75rem 0 1rem;
+            border: 1px solid rgba(38, 200, 167, 0.24);
+            border-radius: 13px;
+            background: rgba(38, 200, 167, 0.07);
+            color: #c6d8e9;
+            font-size: 0.88rem;
+            line-height: 1.5;
+        }
+
+        .workbench-start-guide strong {
+            color: #8cf1da;
+        }
+
         div.stButton > button[kind="primary"]:hover {
             background: linear-gradient(135deg, #8374ff, #a376ff);
         }
@@ -792,6 +807,18 @@ else:
     st.caption(
         "Upload searchable PDFs. New files are processed automatically."
     )
+
+    if not st.session_state.papers:
+        st.markdown(
+            """
+            <div class="workbench-start-guide">
+                <strong>Start here:</strong> Upload a research-paper PDF,
+                wait for indexing to finish, then select it below and ask
+                a question such as “What problem does this paper address?”
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     uploaded_files = st.file_uploader(
         "Upload PDF papers",
