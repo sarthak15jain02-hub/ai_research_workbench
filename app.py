@@ -300,6 +300,32 @@ st.markdown(
             background: linear-gradient(135deg, #7161ef, #9365f3);
         }
 
+        .start-workbench-card {
+            min-height: 252px;
+        }
+
+        .start-workbench-eyebrow {
+            display: inline-block;
+            color: #8cf1da;
+            background: rgba(38, 200, 167, 0.12);
+            border: 1px solid rgba(38, 200, 167, 0.24);
+            border-radius: 999px;
+            padding: 0.25rem 0.62rem;
+            margin-bottom: 0.7rem;
+            font-size: 0.70rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .st-key-start-workbench button {
+            min-height: 3.7rem;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            font-weight: 800;
+            box-shadow: 0 10px 24px rgba(113, 97, 239, 0.25);
+        }
+
         div.stButton > button[kind="primary"]:hover {
             background: linear-gradient(135deg, #8374ff, #a376ff);
         }
@@ -637,7 +663,7 @@ if st.session_state.current_page == "home":
 
     st.write("")
 
-    settings_column, start_column = st.columns([1.25, 1])
+    settings_column, start_column = st.columns([1, 1.15])
 
     with settings_column:
         with st.container(border=True):
@@ -674,7 +700,11 @@ if st.session_state.current_page == "home":
                 st.rerun()
 
     with start_column:
-        with st.container(border=True):
+        with st.container(border=True, key="start-workbench-card"):
+            st.markdown(
+                '<div class="start-workbench-eyebrow">Recommended first step</div>',
+                unsafe_allow_html=True,
+            )
             st.markdown("### Start researching")
 
             current_paper_count = len(st.session_state.papers)
@@ -689,12 +719,13 @@ if st.session_state.current_page == "home":
 
             st.write("")
 
-            st.button(
-                "Open research workbench →",
-                use_container_width=True,
-                type="primary",
-                on_click=open_workbench,
-            )
+            with st.container(key="start-workbench"):
+                st.button(
+                    "Open research workbench  →",
+                    use_container_width=True,
+                    type="primary",
+                    on_click=open_workbench,
+                )
 
             st.caption(
                 "Open the workspace to upload PDFs, select evidence "
