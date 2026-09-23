@@ -4,6 +4,33 @@ AI Research Workbench is a Streamlit-based Retrieval-Augmented Generation (RAG) 
 
 The project is designed for research questions whose exact wording may not appear in the PDF. For example, a paper may not contain the literal phrase **“problem statement”**, but it commonly explains the problem in the Abstract, Introduction, Motivation, Background, or Related Work sections. The application detects these question types and adjusts retrieval to find the relevant evidence.
 
+## Interview Demo
+
+AI Research Workbench is a grounded AI research assistant. Users upload research papers, ask questions about them, and receive answers supported by paper and page citations instead of untraceable chatbot responses.
+
+### Demo workflow
+
+1. Upload one or more searchable research-paper PDFs.
+2. Select the paper or papers to search.
+3. Ask a question such as:
+   - What problem does this paper address?
+   - What methodology does the paper use?
+   - What are the main experimental results?
+   - What limitations do the authors identify?
+4. Review the answer and expand the retrieved evidence to verify the sources.
+
+### Technical highlights
+
+- Retrieval-Augmented Generation using LangChain and Google Gemini.
+- Hybrid retrieval using FAISS dense search and BM25 keyword search.
+- Reciprocal Rank Fusion to combine semantic and lexical rankings.
+- Per-paper indexing with SHA-256 duplicate detection.
+- Intent-aware retrieval for methodology, datasets, results, limitations, and research gaps.
+- Page- and section-level metadata for traceable citations.
+- Explicit insufficient-evidence handling and optional general-knowledge fallback.
+
+The hosted demo requires a Gemini API secret configured by the application owner. Interviewers only need a web browser; they do not need Python, dependencies, or an API key on their computer.
+
 ## What the application currently does
 
 - Upload one or multiple text-based PDF papers.
@@ -155,6 +182,29 @@ AI Research Workbench/
 - Text-based/searchable PDFs. Image-only/scanned PDFs require OCR first.
 
 ## Installation and setup
+
+### Hosted demo
+
+The application can be deployed directly from this repository using Streamlit Community Cloud:
+
+1. Create a new Streamlit Cloud app from this repository.
+2. Select the `main` branch and `app.py` as the main file.
+3. Add the following secret in the app settings:
+
+```toml
+GOOGLE_API_KEY = "your_gemini_api_key"
+```
+
+Optional secrets can also be configured:
+
+```toml
+GEMINI_MODEL = "gemini-2.5-flash"
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
+CHUNK_SIZE = "1000"
+CHUNK_OVERLAP = "150"
+```
+
+Never commit the real API key to GitHub. Use `.env.example` as the local configuration template.
 
 ### 1. Open the project folder
 
